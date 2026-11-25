@@ -30,7 +30,7 @@ test('n8n package registers its node, credentials and all operations', () => {
   assert.equal(require('../' + pkg.n8n.nodes[0]).MaRu, MaRu);
   assert.equal(require('../' + pkg.n8n.credentials[0]).MaRuApi, MaRuApi);
   assert.equal(new MaRuApi().properties[1].typeOptions.password, true);
-  assert.equal(new Set(node.description.properties[0].options.map((o) => o.value)).size, 28);
+  assert.equal(new Set(node.description.properties[0].options.map((o) => o.value)).size, 41);
 });
 test('poll keeps receipt and never auto-acknowledges', async () => {
   const ctx = context(
@@ -94,4 +94,15 @@ test('structured list results retain their array shape', async () => {
   });
   const [items] = await node.execute.call(ctx);
   assert.deepEqual(items[0].json.result, folders);
+});
+
+test('cleanup retains server retention unless the owner supplies days', async () => {
+  const days = node.description.properties.find(p => p.name === 'cleanup_folder_days');
+  assert.equal(days.default, '');
+  const item = { operation: 'cleanup_folder', cleanup_folder_account: 'qa@example.org',
+    cleanup_folder_role: 'drafts', cleanup_folder_days: days.default };
+  const ctx = context([item, { ...item, cleanup_folder_days: '5' }], { structuredContent: {} });
+  await node.execute.call(ctx);
+  assert.equal(Object.hasOwn(ctx.calls[2].params.arguments, 'days'), false);
+  assert.equal(ctx.calls[5].params.arguments.days, 5);
 });

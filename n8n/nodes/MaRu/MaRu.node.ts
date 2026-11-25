@@ -43,7 +43,8 @@ function property(tool: string, field: Field): INodeProperties {
     string: 'string',
     boolean: 'boolean',
   };
-  const type = field.options ? 'options' : (types[field.type] ?? 'json');
+  const optionalInt = field.type === 'integer' && !field.required && field.default === undefined;
+  const type = field.options ? 'options' : optionalInt ? 'string' : (types[field.type] ?? 'json');
   const defaultValue =
     field.default ??
     (type === 'number'
@@ -132,7 +133,15 @@ export class MaRu implements INodeType {
             continue;
           }
           const nested = ['object', 'array'].includes(field.type);
-          args[field.name] = nested && typeof val === 'string' ? JSON.parse(val) : val;
+          if (field.type === 'integer' && typeof val === 'string') {
+            const n = Number(val);
+            if (!/^-?\d+$/.test(val) || !Number.isSafeInteger(n) ||
+                (field.minimum !== undefined && n < field.minimum) ||
+                (field.maximum !== undefined && n > field.maximum)) throw new Error('Invalid integer: ' + field.name);
+            args[field.name] = n;
+          } else {
+            args[field.name] = nested && typeof val === 'string' ? JSON.parse(val) : val;
+          }
         }
         const credentials = await this.getCredentials('maRuApi', i);
         const url = new URL(String(credentials.url));
@@ -177,7 +186,7 @@ export class MaRu implements INodeType {
           {
             protocolVersion,
             capabilities: {},
-            clientInfo: { name: 'n8n-nodes-ma-ru', version: '0.3.0' },
+            clientInfo: { name: 'n8n-nodes-ma-ru', version: '0.4.0' },
           },
           1,
         );
@@ -190,7 +199,7 @@ export class MaRu implements INodeType {
         if (result.isError)
           throw new Error(result.content?.[0]?.text || 'Ma-Ru rejected the operation');
         // FastMCP returns separate text blocks for list results, including empty and singleton lists.
-        const list = ['list_folders', 'read_messages', 'modify_messages'].includes(tool);
+        const list = ['list_folders', 'read_messages', 'modify_messages', 'list_outbox'].includes(tool);
         const parts = () =>
           (result.content || []).map((part) =>
             part.type === 'text' && part.text ? JSON.parse(part.text) : part,

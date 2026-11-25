@@ -1,7 +1,7 @@
 import base64
 import hashlib
-import imaplib
 import re
+import time
 from datetime import date
 from email import policy
 from email.parser import BytesParser
@@ -148,6 +148,13 @@ def fetched_headers(row):
     if not isinstance(raw, bytes):
         raise Problem("IMAP-сервер не вернул запрошенные заголовки письма.")
     return PARSER.parsebytes(raw, headersonly=True)
+
+
+def uid_pages(client, ceiling, criteria, start=1):
+    # Even ten-digit UIDs fit imaplib's one-megabyte response limit.
+    for lo in range(start, ceiling, 60000):
+        hi = min(lo + 59999, ceiling - 1)
+        yield from sorted(client.search(["UID", f"{lo}:{hi}", *criteria]))
 
 
 def identifier_rows(client, uids):
@@ -370,6 +377,47 @@ def summaries(client, account, folder, validity, uids):
     if not uids:
         return []
     rows = client.fetch(uids, [HEADER_PEEK, "FLAGS", "RFC822.SIZE"])
+    from . import knowledge
+
+    with database() as db:
+        registered = db.execute(
+            "SELECT 1 FROM accounts WHERE email=?", (account.email,)
+        ).fetchone()
+    catalog = folder_policy.catalog(client, account.email) if registered else []
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        if folder in knowledge.visible(db, account.email, catalog):
+            db.executemany(
+                "INSERT OR IGNORE INTO observed_uids VALUES(?,?,?,?,?)",
+                [(account.email, folder, validity, uid, time.time()) for uid in rows],
+            )
+            roles = {
+                v.lower()
+                for item in catalog
+                if item["folder"] == folder
+                for v in item["roles"]
+            }
+            if knowledge.mode(db, account.email) != "off" and not roles.intersection(
+                {r"\drafts", r"\junk", r"\spam", r"\trash", r"\all", r"\allmail"}
+            ):
+                for uid, row in rows.items():
+                    msg = fetched_headers(row)
+                    sent = r"\sent" in roles
+                    if not sent or [
+                        a for a, _ in knowledge.addresses(msg, ("From",))
+                    ] == [account.email]:
+                        knowledge.observe(
+                            db,
+                            account.email,
+                            Ref(
+                                account=account.email,
+                                folder=folder,
+                                validity=validity,
+                                uid=uid,
+                            ),
+                            msg,
+                            sent,
+                        )
     result = []
     for uid in uids:
         row = rows.get(uid)
@@ -414,6 +462,7 @@ def summaries(client, account, folder, validity, uids):
     for item, key in zip(result, keys):
         item["local_labels"] = labels.get(key, [])
         item["labels"] = sorted(set(item["labels"] + item["local_labels"]))
+    knowledge.refresh_export(client, account)
     return result
 
 
@@ -528,6 +577,8 @@ def attachment_content(part):
 
 def read(client, account, ref, offset, count):
     msg = raw_message(client, ref, account)
+    from .knowledge import refresh_export, remember_read
+
     content, mime = body(msg)
     flags = flags_view(client.get_flags([ref.uid]).get(ref.uid, ()))
     mid = re.search(r"<[^<>\s]+>", str(msg.get("Message-ID", "")))
@@ -536,8 +587,11 @@ def read(client, account, ref, offset, count):
     )
     flags["local_labels"] = local_labels(account.email, [key]).get(key, [])
     flags["labels"] = sorted(set(flags["labels"] + flags["local_labels"]))
+    memory = remember_read(client, account, ref, msg)
+    refresh_export(client, account)
     return {
         "ref": ref.model_dump(),
+        "memory": memory,
         **flags,
         "headers": {
             k: str(msg.get(k, ""))
@@ -691,22 +745,3 @@ def special(client, role):
             "Сервер не указал системную папку. Получите список папок и выберите нужную явно."
         )
     return folder
-
-
-def move_selected(client, source, dest, uids):
-    if source != dest:
-        if client.has_capability("MOVE"):
-            client.move(uids, dest)
-        elif client.has_capability("UIDPLUS"):
-            client.copy(uids, dest)
-            try:
-                client.add_flags(uids, [r"\Deleted"], silent=True)
-                client.uid_expunge(uids)
-            except (imaplib.IMAP4.error, OSError):
-                raise Problem(
-                    "Копия уже создана. Проверьте обе папки перед повтором перемещения."
-                ) from None
-        else:
-            raise Problem(
-                "Сервер не поддерживает MOVE или UIDPLUS для точного перемещения."
-            )

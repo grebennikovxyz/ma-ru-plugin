@@ -106,7 +106,7 @@ def test_manifest_stdio_handshake(tmp_path):
     env = {**os.environ, "PYTHONUTF8": "1"}
     # Windows platformdirs can use Known Folder APIs rather than LOCALAPPDATA.
     # Isolate the test store directly so CI never queries an actual user vault.
-    bootstrap = "from pathlib import Path; import ma_ru.accounts as a; a.DATA=Path(__import__('sys').argv.pop(1)); from ma_ru.cli import main; main()"
+    bootstrap = "from pathlib import Path; import ma_ru.accounts as a; a.DATA=Path(__import__('sys').argv.pop(1)); import ma_ru.updates as u; u.start=lambda:None; from ma_ru.cli import main; main()"
 
     async def check():
         params = StdioServerParameters(
@@ -128,6 +128,11 @@ def test_manifest_stdio_handshake(tmp_path):
                 "poll_new",
                 "list_labels",
                 "acknowledge_batch",
+                "cancel_send",
+                "lazy_confirm_trash",
+                "cleanup_folder",
+                "export_mail_memory",
+                "version_status",
             } <= by_name.keys()
             assert by_name["read_message"].annotations.readOnlyHint
             assert manifest["interface"]["displayName"] == "Ma-Ru"

@@ -3,6 +3,16 @@
     "description": "List locally connected addresses and their access modes. For first connection run ma-ru connect.",
     "fields": []
   },
+  "version_status": {
+    "description": "Show installed and published stable versions. Refresh explicitly to check GitHub now.",
+    "fields": [
+      {
+        "name": "refresh",
+        "type": "boolean",
+        "default": false
+      }
+    ]
+  },
   "lazy_digest": {
     "description": "Read the local backlog digest. Continue with its run ID and next_offset for more items.",
     "fields": [
@@ -31,7 +41,7 @@
     ]
   },
   "lazy_run": {
-    "description": "Run owner-configured backlog cleanup with explicit message and token budgets. May move mail to Trash or review.",
+    "description": "Run owner-configured backlog cleanup with explicit message and token budgets. Moves uncertain mail to review. Approved ads follow the configured automatic or owner-confirmed Trash policy.",
     "fields": [
       {
         "name": "account",
@@ -51,6 +61,28 @@
         "required": true,
         "minimum": 512,
         "maximum": 1000000
+      }
+    ]
+  },
+  "lazy_confirm_trash": {
+    "description": "Show a page of proposed advertisements and move only after interactive owner confirmation.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "run_id",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "limit",
+        "type": "integer",
+        "default": 25,
+        "minimum": 1,
+        "maximum": 100
       }
     ]
   },
@@ -158,7 +190,7 @@
       {
         "name": "count",
         "type": "integer",
-        "default": 24000,
+        "default": 4000,
         "minimum": 1,
         "maximum": 60000
       }
@@ -259,7 +291,7 @@
     ]
   },
   "list_labels": {
-    "description": "List server keywords and registered labels. Message local_labels identify plugin-only tags.",
+    "description": "List IMAP keywords and registered labels. Unsupported IMAP keywords are stored locally.",
     "fields": [
       {
         "name": "account",
@@ -363,6 +395,32 @@
       }
     ]
   },
+  "cleanup_folder": {
+    "description": "Permanently clean the verified system folder on owner request or owner-configured schedule.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "role",
+        "type": "string",
+        "options": [
+          "spam",
+          "trash",
+          "drafts"
+        ],
+        "required": true
+      },
+      {
+        "name": "days",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 36500
+      }
+    ]
+  },
   "list_drafts": {
     "description": "List saved drafts, newest UIDs first.",
     "fields": [
@@ -419,7 +477,7 @@
     ]
   },
   "update_draft": {
-    "description": "Replace a draft with the supplied full letter including attachments. Save first, then move the old draft to Trash. Reusing the source ref and identical letter does not append another revision. On check_original inspect both folders.",
+    "description": "Replace a saved draft with a new version. Use edit_queued_email for a queued draft.",
     "fields": [
       {
         "name": "ref",
@@ -434,7 +492,7 @@
     ]
   },
   "send_email": {
-    "description": "Send the explicitly requested letter by SMTP. Reuse the identical request_id when retrying; accepted addresses mean SMTP acceptance.",
+    "description": "Queue an explicitly requested letter, with a 30-second undo window. Retry with the same request_id.",
     "fields": [
       {
         "name": "account",
@@ -454,12 +512,218 @@
     ]
   },
   "send_draft": {
-    "description": "Send a reviewed draft once for this draft UID. The draft stays available for inspection or a subsequent move to Trash.",
+    "description": "Queue this immutable draft once. A corrected draft has a new UID and a fresh undo window.",
     "fields": [
       {
         "name": "ref",
         "type": "object",
         "required": true
+      }
+    ]
+  },
+  "list_outbox": {
+    "description": "Show queued, stopped, accepted and uncertain sends across chats.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "job_id",
+        "type": "string"
+      }
+    ]
+  },
+  "cancel_send": {
+    "description": "Stop a queued message immediately. SMTP takeover makes cancellation unavailable.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "job_id",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  "edit_queued_email": {
+    "description": "Stop first, then save an editable IMAP draft. Sending again requires an explicit send_draft.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "job_id",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "subject",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "to",
+        "type": "array"
+      },
+      {
+        "name": "cc",
+        "type": "array"
+      },
+      {
+        "name": "bcc",
+        "type": "array"
+      }
+    ]
+  },
+  "mail_learning": {
+    "description": "Inspect or change learning for one mailbox.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "mode",
+        "type": "string",
+        "options": [
+          "off",
+          "contacts",
+          "contacts_and_facts"
+        ]
+      }
+    ]
+  },
+  "resolve_recipient": {
+    "description": "Look up a name, alias or address, consulting permitted Sent headers from the last 90 days. Ask the owner when needs_choice.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "query",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  "set_contact_alias": {
+    "description": "Add a user-verified name and trusted address to the selected mailbox.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "email",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "alias",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  "save_mail_fact": {
+    "description": "Save or correct a dated fact from a permitted source. Include a short verbatim quote to verify evidence.",
+    "fields": [
+      {
+        "name": "ref",
+        "type": "object",
+        "required": true
+      },
+      {
+        "name": "category",
+        "type": "string",
+        "options": [
+          "preference",
+          "specification",
+          "deadline",
+          "context"
+        ],
+        "required": true
+      },
+      {
+        "name": "fact",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "correspondent",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "fact_date",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "evidence_quote",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "replaces_id",
+        "type": "integer"
+      }
+    ]
+  },
+  "recall_mail_memory": {
+    "description": "Return up to 20 relevant contact or fact records with source links.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "query",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  "export_mail_memory": {
+    "description": "Rebuild the managed mail-memory.md and JSONL for this mailbox and return their local paths.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  "forget_mail_memory": {
+    "description": "Forget one fact or correspondent in this mailbox on the owner's request.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "fact_id",
+        "type": "integer"
+      },
+      {
+        "name": "contact_address",
+        "type": "string"
       }
     ]
   },

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import smtplib
 from contextlib import nullcontext
@@ -7,6 +8,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from conftest import consent, send_now
 from pydantic import ValidationError
 
 from ma_ru import accounts, mail, outbox, server, transport
@@ -189,7 +191,7 @@ def test_batch_flags_are_real_and_round_trip(env):
     result = server.modify_messages(refs, mail.Changes(add_labels=["В работу"]))
     assert result[0]["local_labels"] == ["В работу"] and b"more" not in b.flags[1]
     assert server.count_messages(a.email, mail.Filter(label="В работу"))["total"] == 2
-    server.move_messages([refs[0]], role="archive")
+    asyncio.run(server.move_messages([refs[0]], consent(), role="archive"))
     moved = server.search_messages(a.email, mail.Filter(label="В работу"), "Archive")[
         "messages"
     ]
@@ -212,11 +214,18 @@ def test_move_reject_mixed_refs_before_change(env):
     b.add()
     r = mail.Ref(account=a.email, folder="INBOX", validity=50, uid=1)
     with pytest.raises(accounts.Problem):
-        server.move_messages(
-            [r, r.model_copy(update={"account": "other@example.org"})], role="trash"
+        asyncio.run(
+            server.move_messages(
+                [r, r.model_copy(update={"account": "other@example.org"})],
+                consent(),
+                role="trash",
+            )
         )
     assert b.data["INBOX"]
-    assert server.move_messages([r], role="archive")["destination"] == "Archive"
+    assert (
+        asyncio.run(server.move_messages([r], consent(), role="archive"))["destination"]
+        == "Archive"
+    )
     assert not b.data["INBOX"] and b.data["Archive"]
 
 
@@ -261,10 +270,13 @@ def test_draft_reply_forward_and_bcc_delivery(env, monkeypatch):
     )
     smtp.sendmail.return_value = {}
     monkeypatch.setattr(outbox, "outgoing", lambda _: nullcontext(smtp))
-    receipt = server.send_draft(draft)
-    assert receipt["accepted"] == ["to@example.org", "private@example.org"]
+    receipt = send_now(server.send_draft(draft, consent()))
+    assert receipt["result"]["accepted"] == ["to@example.org", "private@example.org"]
     assert b"Bcc:" not in smtp.sendmail.call_args.args[2]
-    assert server.send_draft(draft) == receipt and smtp.sendmail.call_count == 1
+    assert (
+        asyncio.run(server.send_draft(draft, consent())) == receipt
+        and smtp.sendmail.call_count == 1
+    )
     forward = outbox.build(
         b,
         a,
@@ -274,16 +286,22 @@ def test_draft_reply_forward_and_bcc_delivery(env, monkeypatch):
 
 
 def test_send_reservation_blocks_ambiguous_retry(env, monkeypatch):
-    a, _b = env
+    a, _ = env
     smtp = MagicMock()
     smtp.send_message.side_effect = OSError("connection lost")
     monkeypatch.setattr(outbox, "outgoing", lambda _: nullcontext(smtp))
     letter = outbox.Letter(to=["recipient@example.org"], subject="subject", text="text")
     key = uuid4()
-    with pytest.raises(accounts.Problem, match="Message-ID"):
-        server.send_email(a.email, key, letter)
-    with pytest.raises(accounts.Problem, match="Message-ID"):
-        server.send_email(a.email, key, letter)
+    result = send_now(server.send_email(a.email, key, letter, consent()))
+    assert (
+        result["state"] == "uncertain"
+        and result["result"]["check_sent_for"] == result["message_id"]
+    )
+    assert asyncio.run(server.send_email(a.email, key, letter, consent())) == result
     with pytest.raises(accounts.Problem, match="ключ"):
-        server.send_email(a.email, key, letter.model_copy(update={"text": "other"}))
+        asyncio.run(
+            server.send_email(
+                a.email, key, letter.model_copy(update={"text": "other"}), consent()
+            )
+        )
     assert smtp.send_message.call_count == 1

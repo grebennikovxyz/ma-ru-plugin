@@ -74,13 +74,6 @@ def headers(client, ids):
             yield uid, row, mail.fetched_headers(row)
 
 
-def uid_pages(client, ceiling, criteria, start=1):
-    # Even ten-digit UIDs fit imaplib's one-megabyte response limit.
-    for lo in range(start, ceiling, 60000):
-        hi = min(lo + 59999, ceiling - 1)
-        yield from client.search(["UID", f"{lo}:{hi}", *criteria])
-
-
 @dataclass
 class History:
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -125,7 +118,7 @@ class History:
             self.malformed = False
             self.folder, self.validity, self.next_uid = folder, validity, 1
         if self.next_uid < ceiling:
-            ids = list(uid_pages(client, ceiling, ["UNDELETED"], self.next_uid))
+            ids = list(mail.uid_pages(client, ceiling, ["UNDELETED"], self.next_uid))
             seen = set()
             for uid, row, msg in headers(client, ids):
                 seen.add(uid)
@@ -180,7 +173,7 @@ def discover(client, account, rules):
     for folder in permitted_sources(client, account.email, rules.folders):
         box = client.select_folder(folder, readonly=True)
         for _, row, msg in headers(
-            client, uid_pages(client, box[b"UIDNEXT"], ["UNDELETED"])
+            client, mail.uid_pages(client, box[b"UIDNEXT"], ["UNDELETED"])
         ):
             try:
                 visit(row, msg, False)
@@ -208,7 +201,7 @@ def inventory(client, account, rules, limit=None):
             if start:
                 criteria += ["SINCE", start]
             count = 0
-            for chunk in batched(uid_pages(client, box[b"UIDNEXT"], criteria), 1000):
+            for chunk in batched(mail.uid_pages(client, box[b"UIDNEXT"], criteria), 1000):
                 rows = client.fetch(list(chunk), ["INTERNALDATE"])
                 pairs = [(uid, stamp(row)) for uid, row in rows.items()]
                 count += len(pairs)

@@ -136,6 +136,14 @@ def setup(email):
     rules.protected = sorted(protected)
     rules.approved = sorted(approved - protected)
     rules.review = sorted(review - protected)
+    mode = input(
+        "Чистая реклама одобренных отправителей: 1 — сразу в Корзину, "
+        f"2 — подтвердить в дайджесте [{2 if rules.confirm_trash else 1}]: "
+    ).strip()
+    if mode:
+        if mode not in {"1", "2"}:
+            raise Problem("Выберите режим 1 или 2.")
+        rules.confirm_trash = mode == "2"
     weekly = input(
         f"Недельный предел в процентных пунктах за короткое окно [{rules.weekly:g}]: "
     ).strip()

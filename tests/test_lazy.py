@@ -59,6 +59,12 @@ class Inbox(Box):
     def find_special_folder(self, flag):
         return "Sent" if flag == rb"\Sent" else super().find_special_folder(flag)
 
+    def list_folders(self):
+        roles = {"Sent": rb"\Sent", "Trash": rb"\Trash"}
+        return [
+            ((roles[name],) if name in roles else (), b"/", name) for name in self.data
+        ]
+
     def folder_exists(self, name):
         return name in self.data
 
@@ -357,3 +363,98 @@ def test_activity_requires_observed_anchor_and_quiet_period(monkeypatch):
         assert not proxy.allowed()
 
     asyncio.run(scenario())
+
+
+def test_approval_rechecks_star_and_binds_page_after_click(inbox):
+    from types import SimpleNamespace
+
+    acc, box, rules = inbox
+    rules.confirm_trash = True
+    store.save(acc.email, rules)
+    box.message(1)
+    box.message(2)
+
+    async def advertisement(items):
+        return {
+            "decisions": [
+                {"id": i, "kind": "advertisement", "reason": "Sale"}
+                for i in range(len(items))
+            ]
+        }
+
+    run = asyncio.run(worker.run({acc.email: rules}, advertisement))["run"]
+    assert not box.moves
+
+    async def click(prompt, schema):
+        assert (
+            acc.email in prompt and "Offers" in prompt and "shop@example.org" in prompt
+        )
+        box.flags[1] = {rb"\Flagged"}
+        box.message(3)
+        return SimpleNamespace(
+            action="accept", data=schema(move_listed_messages_to_trash=True)
+        )
+
+    async def decline(prompt, schema):
+        return SimpleNamespace(action="decline", data=None)
+
+    with pytest.raises(worker.Problem, match="Письма сохранены"):
+        asyncio.run(
+            worker.confirm_trash(acc.email, run, 100, SimpleNamespace(elicit=decline))
+        )
+    assert not box.moves
+    result = asyncio.run(
+        worker.confirm_trash(acc.email, run, 100, SimpleNamespace(elicit=click))
+    )
+    assert result["moved"] == 1 and box.moves == [("INBOX", 2, "Trash")]
+    assert (
+        asyncio.run(
+            worker.confirm_trash(acc.email, run, 100, SimpleNamespace(elicit=click))
+        )["moved"]
+        == 0
+    )
+
+
+def test_manual_mcp_sampling_proposes_instead_of_moving(inbox):
+    from types import SimpleNamespace
+
+    from ma_ru import server
+
+    acc, box, rules = inbox
+    rules.confirm_trash = True
+    store.save(acc.email, rules)
+    box.message(1)
+
+    async def respond(messages, **options):
+        assert options["include_context"] == "none"
+        return SimpleNamespace(
+            content=SimpleNamespace(
+                text=json.dumps(
+                    {
+                        "decisions": [
+                            {"id": 0, "kind": "advertisement", "reason": "Sale"}
+                        ]
+                    }
+                )
+            )
+        )
+
+    session = SimpleNamespace(
+        check_client_capability=lambda _: True, create_message=respond
+    )
+    result = asyncio.run(
+        server.lazy_run(acc.email, 1, 12000, SimpleNamespace(session=session))
+    )
+    assert worker.digest(acc.email, result["run"])["counts"] == {"awaiting_trash": 1}
+    assert not box.moves
+
+
+def test_v030_policy_keeps_automatic_action_and_existing_work_identity():
+    from hashlib import sha256
+
+    old = '{"folders":["INBOX"],"protected":[],"approved":["ads@example.org"],"review":[],"sent":true,"weekly":1.0,"anchor":"","endpoint":""}'
+    rules = store.Rules.model_validate_json(old)
+    assert not rules.confirm_trash
+    assert rules.revision == sha256(old.encode()).hexdigest()
+    rules.confirm_trash = True
+    assert rules.revision != sha256(old.encode()).hexdigest()

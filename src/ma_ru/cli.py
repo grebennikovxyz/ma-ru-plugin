@@ -5,10 +5,25 @@ from . import lazy_cli, wizard
 from .accounts import Problem, forget, profiles
 
 
+def start_background():
+    from .delivery import recover
+    from .updates import start
+
+    recover()
+    start()
+    lazy_cli.ensure_watch()
+
+
 def main():
     cli = argparse.ArgumentParser(prog="ma-ru", description="Почта Mail.ru для агентов")
     actions = cli.add_subparsers(dest="action", required=True)
     lazy_cli.register(actions)
+    updates = actions.add_parser("updates", help="Проверка опубликованной версии Ma-Ru")
+    setting = updates.add_mutually_exclusive_group()
+    for flag in ("on", "off", "check"):
+        setting.add_argument(
+            "--" + flag, dest="update_mode", action="store_const", const=flag
+        )
     setup = actions.add_parser("connect", help="Мастер подключения")
     interface = setup.add_mutually_exclusive_group()
     interface.add_argument("--terminal", action="store_true", help="Текстовый мастер")
@@ -31,26 +46,50 @@ def main():
         "--public-origin", required=True, help="Внешний HTTPS-адрес без пути"
     )
     http.add_argument("--port", type=int, default=8765, help="Порт на 127.0.0.1")
+    worker = actions.add_parser("deliver", help=argparse.SUPPRESS)
+    worker.add_argument("job")
+    read = actions.add_parser(
+        "read", help="Экономичный разовый запуск Codex для чтения почты"
+    )
+    read.add_argument("--show-model", action="store_true")
+    read.add_argument("prompt", nargs="?")
     logout = actions.add_parser(
         "disconnect", help="Удалить локальный доступ и позиции расписаний"
     )
     logout.add_argument("account")
     args = cli.parse_args()
     try:
-        if args.action == "lazy":
+        if args.action == "updates":
+            from . import updates as releases
+
+            value = (
+                releases.configure(args.update_mode == "on")
+                if args.update_mode in ("on", "off")
+                else releases.check(force=args.update_mode == "check")
+            )
+            print(json.dumps(value, ensure_ascii=False, indent=2))
+        elif args.action == "lazy":
             lazy_cli.dispatch(args)
-        elif args.action == "serve":
-            from .server import mcp
+        elif args.action in {"serve", "serve-http"}:
+            if args.action == "serve-http":
+                from .remote import serve
 
-            lazy_cli.ensure_watch()
-            mcp.run()
-        elif args.action == "serve-http":
-            from .remote import serve
+                if not 1 <= args.port <= 65535:
+                    raise Problem("Укажите порт от 1 до 65535.")
+                serve(args.public_origin, args.port)
+            else:
+                from .server import mcp
 
-            if not 1 <= args.port <= 65535:
-                raise Problem("Укажите порт от 1 до 65535.")
-            lazy_cli.ensure_watch()
-            serve(args.public_origin, args.port)
+                start_background()
+                mcp.run()
+        elif args.action == "deliver":
+            from .delivery import run
+
+            run(args.job)
+        elif args.action == "read":
+            from .economy import launch
+
+            raise SystemExit(launch(args.prompt, args.show_model))
         elif args.action == "status":
             print(json.dumps(profiles(), ensure_ascii=False, indent=2))
         elif args.action == "check":

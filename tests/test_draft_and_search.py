@@ -64,3 +64,18 @@ def test_attachment_search_uses_only_bodystructure():
         "LARGER",
         "1000",
     ]
+
+
+def test_pending_draft_cannot_be_replaced_through_update_tool(env):
+    import asyncio
+
+    from conftest import consent
+
+    acc, box = env
+    letter = outbox.Letter(to=["reader@example.net"], subject="Проба", text="one")
+    ref = mail.Ref(**server.create_draft(acc.email, letter)["ref"])
+    queued = asyncio.run(server.send_draft(ref, consent()))
+    with pytest.raises(accounts.Problem, match="очеред"):
+        server.update_draft(ref, letter.model_copy(update={"text": "two"}))
+    assert len(box.data["Drafts"]) == 1
+    assert server.list_outbox(acc.email, queued["job_id"])[0]["state"] == "queued"

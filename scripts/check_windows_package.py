@@ -21,7 +21,18 @@ async def verify(folder):
     for entry in config["mcpServers"].values():
         command = (folder / entry["command"]).resolve()
         assert command == Path(sys.executable).resolve()
-        params = StdioServerParameters(command=str(command), args=entry["args"])
+        # Exercise the packaged entry point with an empty store. A normal serve
+        # invocation also resumes real pending sends for the current OS user.
+        args = entry["args"]
+        assert args == ["-I", "-B", "-m", "ma_ru.cli", "serve"]
+        bootstrap = (
+            "import sys,runpy; from pathlib import Path; import ma_ru.accounts as a; "
+            "import ma_ru.updates as u; u.start=lambda:None; a.DATA=Path(sys.argv.pop(1)); runpy.run_module('ma_ru.cli',run_name='__main__')"
+        )
+        params = StdioServerParameters(
+            command=str(command),
+            args=["-I", "-B", "-c", bootstrap, str(folder / "qa-data"), "serve"],
+        )
         async with stdio_client(params) as (r, w), ClientSession(r, w) as session:
             await session.initialize()
             names = {tool.name for tool in (await session.list_tools()).tools}
@@ -35,6 +46,15 @@ async def verify(folder):
                 "read_message",
                 "modify_messages",
                 "send_email",
+                "cancel_send",
+                "lazy_run",
+                "version_status",
+                "update_draft",
+                "lazy_confirm_trash",
+                "edit_queued_email",
+                "cleanup_folder",
+                "resolve_recipient",
+                "export_mail_memory",
             } <= names
             print(f"Standalone plugin returned {len(names)} tools.")
 

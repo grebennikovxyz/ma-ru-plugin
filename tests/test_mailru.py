@@ -85,3 +85,19 @@ def test_http_requires_bearer_and_checks_origin():
             not result["isError"]
             and json.loads(result["content"][0]["text"])["accounts"] == []
         )
+
+
+def test_verified_folder_roles_use_mailru_xlist_and_reject_conflicts():
+    from ma_ru.folders import verified_role
+
+    client = MagicMock()
+    client.has_capability.side_effect = lambda name: name == "XLIST"
+    client.list_folders.return_value = [((), b"/", "Корзина")]
+    client.xlist_folders.return_value = [
+        ((rb"\Trash",), b"/", "Корзина"),
+        ((rb"\Spam",), b"/", "Нежелательные"),
+    ]
+    assert verified_role(client, "trash") == "Корзина"
+    assert verified_role(client, "spam") == "Нежелательные"
+    client.list_folders.return_value = [((rb"\Trash",), b"/", "Другая папка")]
+    assert verified_role(client, "trash") is None

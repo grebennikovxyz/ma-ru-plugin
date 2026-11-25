@@ -58,4 +58,7 @@ def application(public_origin, token):
 
 def serve(public_origin, port):
     app = application(public_origin, os.environ.get("MA_RU_MCP_TOKEN"))
+    from .cli import start_background
+
+    start_background()
     uvicorn.run(app, host="127.0.0.1", port=port, proxy_headers=False, access_log=False)

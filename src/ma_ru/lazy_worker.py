@@ -4,7 +4,7 @@ import asyncio
 
 from filelock import Timeout
 
-from . import accounts, folders, lazy_codex, lazy_mail, lazy_store, mail
+from . import accounts, folders, lazy_codex, lazy_mail, lazy_store, mail, removal
 from .accounts import Problem
 from .transport import mailbox
 
@@ -97,7 +97,7 @@ def prepare(row, rules, history):
         return lazy_mail.inspect(client, acc, rules, reference(row), history)
 
 
-def apply(row, rules, history, item, action, reason, guard):
+def apply(row, rules, history, item, action, reason, guard, *, confirmed_dest=None):
     if not guard():
         return
     key = row["id"]
@@ -128,7 +128,27 @@ def apply(row, rules, history, item, action, reason, guard):
 
         if not check() or not guard():
             return
-        dest = mail.special(client, "trash") if action == "trash" else lazy_mail.REVIEW
+        if action == "trash" and rules.confirm_trash and confirmed_dest is None:
+            with lazy_store.db() as db:
+                db.execute("UPDATE lazy_queue SET mid=? WHERE id=?", (item.mid, key))
+            lazy_store.finish_item(key, "awaiting_trash", reason, item.subject)
+            return
+        dest = (
+            folders.verified_role(client, "trash")
+            if action == "trash"
+            else lazy_mail.REVIEW
+        )
+        if not dest or (confirmed_dest and dest != confirmed_dest):
+            raise Problem("Сервер не подтвердил выбранную Корзину.")
+        if action == "review" and any(
+            i["folder"] == dest
+            and (
+                not i["selectable"]
+                or {r.lower() for r in i["roles"]} & folders.SYSTEM_ROLES
+            )
+            for i in folders.catalog(client, acc.email)
+        ):
+            raise Problem("Папка согласования совпала с системной папкой.")
         if dest == ref.folder:
             lazy_store.finish_item(key, "keep", "Уже в целевой папке", item.subject)
             return
@@ -160,11 +180,17 @@ def apply(row, rules, history, item, action, reason, guard):
         if not guard():
             lazy_store.finish_item(key, "pending", "Работа приостановлена")
             return
-        mail.move_selected(client, ref.folder, dest, [ref.uid])
+        reply = removal.move_uids(client, [ref.uid], dest)
+        removal.record_move(acc.email, dest, 1, reply)
         lazy_store.finish_item(key, action, reason, item.subject)
 
 
 def reconcile(email):
+    with lazy_store.policy_lock():
+        reconcile_moves(email)
+
+
+def reconcile_moves(email):
     with lazy_store.db() as con:
         rows = list(
             con.execute(
@@ -197,7 +223,7 @@ def reconcile(email):
                 and info[b"UIDVALIDITY"] == row["dest_validity"]
                 and info[b"UIDNEXT"] > row["dest_next"]
             ):
-                possible = lazy_mail.uid_pages(
+                possible = mail.uid_pages(
                     client, info[b"UIDNEXT"], ["UNDELETED"], row["dest_next"]
                 )
                 matched = [
@@ -474,11 +500,102 @@ def digest(email, run_id=None, offset=0, limit=20):
         raise Problem("Укажите неотрицательное смещение и от 1 до 100 записей.")
     acc = accounts.current(email)
     if not any(mode == "blocked" for mode, _ in folders.rules(acc.email).values()):
-        return lazy_store.digest(email, None, run_id, offset, limit)
+        return lazy_store.digest(acc.email, None, run_id, offset, limit)
     with mailbox(acc) as client:
         items = folders.catalog(client, email)
         folders.check_blocked_roots(items)
         permitted = {
             i["folder"] for i in items if i["selectable"] and i["mode"] != "blocked"
         }
-    return lazy_store.digest(email, permitted, run_id, offset, limit)
+    return lazy_store.digest(acc.email, permitted, run_id, offset, limit)
+
+
+async def confirm_trash(account, run_id, limit, ctx):
+    """Bind owner approval to this page, then repeat eligibility checks before moving."""
+    acc = accounts.current(account, "organize")
+    rules = lazy_store.policies().get(acc.email)
+    if not rules or not rules.sent:
+        raise Problem("Включите защиту личной переписки в мастере.")
+    with mailbox(acc) as client:
+        sources = set(lazy_mail.permitted_sources(client, acc.email, rules.folders))
+        dest = folders.verified_role(client, "trash")
+        if not dest:
+            raise Problem("Сервер не подтвердил системную Корзину.")
+        folders.allow(acc.email, dest, client)
+        from itertools import islice
+
+        with lazy_store.db() as db:
+            rows = list(
+                islice(
+                    (
+                        dict(r)
+                        for r in db.execute(
+                            "SELECT * FROM lazy_queue WHERE account=? AND run=? AND state='awaiting_trash' AND revision=? ORDER BY received,id",
+                            (acc.email, run_id, rules.revision),
+                        )
+                        if r["folder"] in sources
+                    ),
+                    limit,
+                )
+            )
+        snapshot, candidates = [], []
+        for row in rows:
+            ref = reference(row)
+            mail.checked_folder(client, ref, acc)
+            entry = next(lazy_mail.headers(client, [ref.uid]), None)
+            if entry and str(entry[2].get("Message-ID", "")).strip() == row["mid"]:
+                snapshot.append(
+                    (
+                        ref.model_dump(),
+                        str(entry[2].get("From", "")),
+                        entry[1][b"INTERNALDATE"].isoformat(),
+                        str(entry[2].get("Subject", "")),
+                    )
+                )
+                candidates.append(row)
+            else:
+                with lazy_store.policy_lock(), lazy_store.db() as db:
+                    pending = db.execute(
+                        "SELECT 1 FROM lazy_queue WHERE id=? AND state='awaiting_trash'",
+                        (row["id"],),
+                    ).fetchone()
+                    if pending:
+                        lazy_store.finish_item(
+                            row["id"], "stale", "Исходное письмо перемещено"
+                        )
+        if not snapshot:
+            return {"run": run_id, "moved": 0}
+    await removal.confirm_snapshot(ctx, acc.email, dest, snapshot)
+    moved = 0
+    with lazy_store.policy_lock():
+        if lazy_store.policies().get(acc.email) != rules:
+            raise Problem("Правила изменились. Откройте дайджест заново.")
+        history = lazy_mail.History()
+        for row in candidates:
+            with lazy_store.db() as db:
+                if not db.execute(
+                    "SELECT 1 FROM lazy_queue WHERE id=? AND state='awaiting_trash'",
+                    (row["id"],),
+                ).fetchone():
+                    continue
+            item = lazy_mail.Decision(
+                "trash", row["reason"], row["subject"], mid=row["mid"]
+            )
+            apply(
+                row,
+                rules,
+                history,
+                item,
+                "trash",
+                row["reason"],
+                lambda: True,
+                confirmed_dest=dest,
+            )
+            with lazy_store.db() as db:
+                moved += (
+                    db.execute(
+                        "SELECT state FROM lazy_queue WHERE id=?", (row["id"],)
+                    ).fetchone()[0]
+                    == "trash"
+                )
+    return {"run": run_id, "moved": moved}

@@ -15,6 +15,7 @@ class Rules(BaseModel):
     protected: list[str] = Field(default_factory=list)
     approved: list[str] = Field(default_factory=list)
     review: list[str] = Field(default_factory=list)
+    confirm_trash: bool = False
     sent: bool = False
     weekly: float = Field(default=1, gt=0, le=100)
     anchor: str = ""
@@ -22,7 +23,10 @@ class Rules(BaseModel):
 
     @property
     def revision(self):
-        return sha256(self.model_dump_json().encode()).hexdigest()
+        data = self.model_dump_json(
+            exclude=set() if self.confirm_trash else {"confirm_trash"}
+        )
+        return sha256(data.encode()).hexdigest()
 
 
 @contextmanager
@@ -92,7 +96,12 @@ def save(email, rules):
             "",
             "Папки: " + ", ".join(rules.folders),
             "Всегда сохранять: " + ", ".join(rules.protected),
-            "Рекламу можно перенести в Корзину: " + ", ".join(rules.approved),
+            (
+                "Запрашивать подтверждение переноса в Корзину: "
+                if rules.confirm_trash
+                else "Рекламу можно перенести в Корзину: "
+            )
+            + ", ".join(rules.approved),
             "На согласование: " + ", ".join(rules.review),
             "Защита отмеченных писем и переписки с ответами владельца действует раньше правил рассылок.",
             "Незнакомые отправители и письма с существенной информацией идут на согласование.",
@@ -109,7 +118,7 @@ def save(email, rules):
             (email, rules.model_dump_json()),
         )
         con.execute(
-            "DELETE FROM lazy_queue WHERE account=? AND revision!=? AND state IN ('pending','working','keep')",
+            "DELETE FROM lazy_queue WHERE account=? AND revision!=? AND state IN ('pending','working','keep','awaiting_trash')",
             (email, rules.revision),
         )
         con.execute("DELETE FROM lazy_inventory WHERE account=?", (email,))
@@ -178,7 +187,7 @@ def reserve_move(key, state, dest, box, mid, reason, subject):
     with db() as con:
         con.execute(
             """UPDATE lazy_queue SET state=?,dest=?,dest_validity=?,dest_next=?,mid=?,reason=?,subject=?
-                       WHERE id=? AND state='working'""",
+                       WHERE id=? AND state IN ('working','awaiting_trash')""",
             (
                 "moving_" + state,
                 dest,
@@ -249,9 +258,9 @@ def digest(email, permitted, run=None, offset=0, limit=20):
             )
         )
         rows = con.execute(
-            f"""SELECT subject,reason,COALESCE(dest,folder) AS folder,uid AS original_uid
-                         FROM lazy_results WHERE {scope} AND state IN ('review','uncertain','moving_trash','moving_review')
-                         ORDER BY (state='review'),(reason='Отправитель требует согласования'),received,uid
+            f"""SELECT state,subject,reason,COALESCE(dest,folder) AS folder,uid AS original_uid
+                         FROM lazy_results WHERE {scope} AND state IN ('review','uncertain','moving_trash','moving_review','awaiting_trash')
+                         ORDER BY (state='awaiting_trash'),(state='review'),(reason='Отправитель требует согласования'),received,uid
                          LIMIT ? OFFSET ?""",
             (*args, limit + 1, offset),
         ).fetchall()
