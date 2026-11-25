@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import re
 from itertools import groupby, islice
 from typing import Annotated, Literal
@@ -45,6 +46,66 @@ Scopes = Annotated[list[MailboxScope], Field(min_length=1, max_length=100)]
 def list_accounts() -> dict:
     """List locally connected addresses and their access modes. For first connection run ma-ru connect."""
     return {"accounts": profiles(), "setup": "ma-ru connect"}
+
+
+@mcp.tool(annotations=READ)
+def lazy_digest(account: Short, run_id: Short | None = None) -> dict:
+    """Read the local backlog digest and reasons for items requiring attention."""
+    from .lazy_worker import digest
+
+    return digest(account, run_id)
+
+
+@mcp.tool(annotations=WRITE)
+async def lazy_run(
+    account: Short,
+    max_messages: Annotated[int, Field(ge=1, le=1000)],
+    token_budget: Annotated[int, Field(ge=512, le=1000000)],
+    ctx: Context,
+) -> dict:
+    """Run owner-configured backlog cleanup with explicit message and token budgets. May move mail to Trash or review."""
+    from mcp import types
+
+    from . import lazy_codex, lazy_store, lazy_worker
+
+    acc = current(account, "organize")
+    rules = lazy_store.policies().get(acc.email)
+    if not rules:
+        raise Problem("Сначала пройдите ma-ru lazy setup.")
+    if not ctx.session.check_client_capability(
+        types.ClientCapabilities(sampling=types.SamplingCapability())
+    ):
+        # Clients without MCP sampling can still use the local configured Codex classifier.
+        from .lazy_cli import manual
+
+        return await manual(acc.email, max_messages, token_budget)
+
+    async def classify(item):
+        response = await ctx.session.create_message(
+            [
+                types.SamplingMessage(
+                    role="user",
+                    content=types.TextContent(
+                        type="text", text=lazy_codex.prompt(item)
+                    ),
+                )
+            ],
+            max_tokens=192 * len(item),
+            include_context="none",
+            temperature=0,
+            model_preferences=types.ModelPreferences(costPriority=1, speedPriority=0.8),
+        )
+        try:
+            return json.loads(response.content.text)
+        except (ValueError, AttributeError):
+            return {}
+
+    return await lazy_worker.run(
+        {acc.email: rules},
+        classify,
+        max_messages=max_messages,
+        token_budget=token_budget,
+    )
 
 
 @mcp.tool(annotations=READ)

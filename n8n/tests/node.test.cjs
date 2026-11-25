@@ -30,7 +30,7 @@ test('n8n package registers its node, credentials and all operations', () => {
   assert.equal(require('../' + pkg.n8n.nodes[0]).MaRu, MaRu);
   assert.equal(require('../' + pkg.n8n.credentials[0]).MaRuApi, MaRuApi);
   assert.equal(new MaRuApi().properties[1].typeOptions.password, true);
-  assert.equal(new Set(node.description.properties[0].options.map((o) => o.value)).size, 26);
+  assert.equal(new Set(node.description.properties[0].options.map((o) => o.value)).size, 28);
 });
 test('poll keeps receipt and never auto-acknowledges', async () => {
   const ctx = context(

@@ -3,6 +3,44 @@
     "description": "List locally connected addresses and their access modes. For first connection run ma-ru connect.",
     "fields": []
   },
+  "lazy_digest": {
+    "description": "Read the local backlog digest and reasons for items requiring attention.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "run_id",
+        "type": "string"
+      }
+    ]
+  },
+  "lazy_run": {
+    "description": "Run owner-configured backlog cleanup with explicit message and token budgets. May move mail to Trash or review.",
+    "fields": [
+      {
+        "name": "account",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "max_messages",
+        "type": "integer",
+        "required": true,
+        "minimum": 1,
+        "maximum": 1000
+      },
+      {
+        "name": "token_budget",
+        "type": "integer",
+        "required": true,
+        "minimum": 512,
+        "maximum": 1000000
+      }
+    ]
+  },
   "list_folders": {
     "description": "Show folder rules, effective modes, roles and optional permitted counts for one mailbox.",
     "fields": [

@@ -165,3 +165,6 @@ def forget(email):
             db.execute("DELETE FROM accounts WHERE email=?", (email,))
             if vault().get_password(SERVICE, row["secret"]) is not None:
                 vault().delete_password(SERVICE, row["secret"])
+    from .lazy_store import skill_path
+
+    skill_path(email).unlink(missing_ok=True)

@@ -177,7 +177,7 @@ export class MaRu implements INodeType {
           {
             protocolVersion,
             capabilities: {},
-            clientInfo: { name: 'n8n-nodes-ma-ru', version: '0.2.0' },
+            clientInfo: { name: 'n8n-nodes-ma-ru', version: '0.3.0' },
           },
           1,
         );

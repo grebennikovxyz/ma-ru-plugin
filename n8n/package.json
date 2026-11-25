@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-ma-ru",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Mail.ru mailbox operations and scheduled feeds through a personal Ma-Ru gateway",
   "author": "Антон Гребенников",
   "license": "Apache-2.0",

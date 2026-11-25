@@ -1,13 +1,14 @@
 import argparse
 import json
 
-from . import wizard
+from . import lazy_cli, wizard
 from .accounts import Problem, forget, profiles
 
 
 def main():
     cli = argparse.ArgumentParser(prog="ma-ru", description="Почта Mail.ru для агентов")
     actions = cli.add_subparsers(dest="action", required=True)
+    lazy_cli.register(actions)
     setup = actions.add_parser("connect", help="Мастер подключения")
     interface = setup.add_mutually_exclusive_group()
     interface.add_argument("--terminal", action="store_true", help="Текстовый мастер")
@@ -36,15 +37,19 @@ def main():
     logout.add_argument("account")
     args = cli.parse_args()
     try:
-        if args.action == "serve":
+        if args.action == "lazy":
+            lazy_cli.dispatch(args)
+        elif args.action == "serve":
             from .server import mcp
 
+            lazy_cli.ensure_watch()
             mcp.run()
         elif args.action == "serve-http":
             from .remote import serve
 
             if not 1 <= args.port <= 65535:
                 raise Problem("Укажите порт от 1 до 65535.")
+            lazy_cli.ensure_watch()
             serve(args.public_origin, args.port)
         elif args.action == "status":
             print(json.dumps(profiles(), ensure_ascii=False, indent=2))
