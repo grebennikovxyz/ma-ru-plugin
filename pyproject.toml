@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "grebennikov-ma-ru"
-version = "0.1.0"
+version = "0.1.1"
 description = "Mail.ru over MCP for agents and scheduled tasks"
 requires-python = ">=3.13"
 readme = "README.md"

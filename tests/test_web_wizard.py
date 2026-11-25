@@ -26,6 +26,7 @@ def test_phone_form_requires_pairing_and_same_origin(monkeypatch):
 
         try:
             response, html = call("GET")
+            assert response.getheader("Referrer-Policy") == "same-origin"
             assert (
                 response.status == 200
                 and response.getheader("Cache-Control") == "no-store"
