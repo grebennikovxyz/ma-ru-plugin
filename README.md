@@ -84,6 +84,8 @@ openclaw mcp add ma-ru --command ma-ru --arg serve
 openclaw mcp probe ma-ru
 ```
 
+Эти команды с проверкой запускайте в профиле с остановленным Gateway. Если он уже работает, сохраните запись командой `openclaw mcp add ma-ru --command ma-ru --arg serve --no-probe` и проверьте инструменты в новой сессии агента. Отдельная команда `probe` проверяет запуск без обращения к модели.
+
 При ручной настройке добавьте запись в существующий объект `mcp.servers`. Если служба не находит команду, укажите абсолютный путь, который возвращает `(Get-Command ma-ru).Source` в PowerShell или `command -v ma-ru` в Unix. После изменения конфигурации откройте новую сессию агента. [Реестр MCP OpenClaw](https://docs.openclaw.ai/cli/mcp) · [Настройки Gateway](https://docs.openclaw.ai/gateway/configuration-reference)
 
 ```json
