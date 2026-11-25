@@ -12,6 +12,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from .accounts import Problem, address, database
+from .folders import allow
 from .mail import (
     Filter,
     Ref,
@@ -19,6 +20,7 @@ from .mail import (
     checked_folder,
     move_selected,
     raw_message,
+    reply_source,
     search_folder,
     special,
 )
@@ -46,7 +48,14 @@ class Letter(BaseModel):
     forward_message: Ref | None = None
 
 
-def build(client, account, letter):
+def reply_addresses(original):
+    header = original.get("Reply-To") or original.get("From")
+    if not header or header.defects or not header.addresses:
+        raise Problem("Проверьте адрес получателя ответа в исходном письме.")
+    return [address(a.addr_spec) for a in header.addresses]
+
+
+def build(client, account, letter, *, original=None):
     if letter.reply_to_message and letter.forward_message:
         raise Problem("Выберите ответ или пересылку.")
     msg = EmailMessage(policy=policy.SMTP)
@@ -58,7 +67,10 @@ def build(client, account, letter):
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain=account.email.split("@")[1])
     if letter.reply_to_message:
-        original = raw_message(client, letter.reply_to_message, account)
+        if original is None:
+            original = reply_source(client, letter.reply_to_message, account)
+        if not (letter.to or letter.cc or letter.bcc):
+            msg["To"] = ", ".join(reply_addresses(original))
         parent = str(original.get("Message-ID", ""))
         if not re.fullmatch(r"<[^<>\s]+>", parent):
             raise Problem("У исходного письма отсутствует корректный Message-ID.")
@@ -99,13 +111,14 @@ def build(client, account, letter):
     return msg
 
 
-def draft(client, account, letter):
-    msg = build(client, account, letter)
+def draft(client, account, letter, *, original=None):
+    msg = build(client, account, letter, original=original)
     folder = special(client, "drafts")
     return append_draft(client, account, folder, msg)
 
 
 def append_draft(client, account, folder, msg):
+    allow(account.email, folder, client)
     reply = client.append(folder, msg.as_bytes(), flags=[r"\Draft", r"\Seen"])
     match = re.search(rb"\bAPPENDUID (\d+) (\d+)", reply or b"", re.IGNORECASE)
     ref = None
@@ -127,6 +140,9 @@ def append_draft(client, account, folder, msg):
         except (IMAP4.error, OSError, Problem):
             pass
     return {
+        "from": str(msg["From"]),
+        "to": [a.addr_spec for a in msg["To"].addresses] if msg["To"] else [],
+        "subject": str(msg["Subject"]),
         "folder": folder,
         "message_id": str(msg["Message-ID"]),
         "ref": ref.model_dump() if ref else None,
@@ -137,6 +153,8 @@ def revise(client, account, ref, letter):
     if ref.folder != special(client, "drafts"):
         raise Problem("Для редактирования выберите письмо из Черновиков.")
     trash = special(client, "trash")
+    allow(account.email, ref.folder, client)
+    allow(account.email, trash, client)
     if trash == ref.folder:
         raise Problem("Выберите разные системные папки для Черновиков и Корзины.")
     key = (account.email, ref.folder, ref.validity, ref.uid)

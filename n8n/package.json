@@ -1,0 +1,46 @@
+{
+  "name": "n8n-nodes-ma-ru",
+  "version": "0.2.0",
+  "description": "Mail.ru mailbox operations and scheduled feeds through a personal Ma-Ru gateway",
+  "author": "Антон Гребенников",
+  "license": "Apache-2.0",
+  "keywords": [
+    "n8n-community-node-package",
+    "mailru",
+    "imap",
+    "mail"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grebennikovxyz/ma-ru-plugin.git",
+    "directory": "n8n"
+  },
+  "homepage": "https://github.com/grebennikovxyz/ma-ru-plugin/tree/main/n8n",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-icon.cjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test tests/*.test.cjs"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/MaRuApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/MaRu/MaRu.node.js"
+    ]
+  },
+  "devDependencies": {
+    "n8n-workflow": "2.49.4",
+    "typescript": "5.9.3",
+    "@types/node": "22.19.1"
+  },
+  "peerDependencies": {
+    "n8n-workflow": ">=2.0.0 <3"
+  }
+}

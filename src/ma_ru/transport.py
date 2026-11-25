@@ -65,7 +65,7 @@ def connect(email, password, mode):
         )
     account = Account(email, mode, password)
     with mailbox(account) as client:
-        client.select_folder("INBOX", readonly=True)
+        client.list_folders()
     if mode == "send":
         with outgoing(account):
             pass

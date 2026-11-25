@@ -44,7 +44,8 @@ class Box:
         msg["From"] = EMAIL
         msg["To"] = "user@example.org"
         msg["Subject"] = subject
-        msg["Message-ID"] = f"<{uid}-{folder}@example.org>"
+        label = folder if folder.isascii() else folder.encode().hex()
+        msg["Message-ID"] = f"<{uid}-{label}@example.org>"
         msg.set_content("Заказ готов")
         msg.add_attachment(
             b"fixture", maintype="application", subtype="pdf", filename="Счёт.pdf"

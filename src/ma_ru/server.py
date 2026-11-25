@@ -1,14 +1,17 @@
 import base64
+import hashlib
 import re
 from itertools import groupby, islice
 from typing import Annotated, Literal
 from uuid import UUID
 
-from mcp.server.fastmcp import FastMCP
+from keyring.errors import KeyringError
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from . import feeds, mail, outbox
+from . import feeds, mail, outbox, routing
+from . import folders as policy
 from .accounts import Problem, current, database, profiles
 from .mail import Changes, Filter, PageSize, Ref, Short, checked_folder, special
 from .transport import mailbox
@@ -23,6 +26,21 @@ LOCAL = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint
 Refs = Annotated[list[Ref], Field(min_length=1, max_length=100)]
 
 
+class MailboxScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    account: Short
+    folders: Annotated[list[Short], Field(max_length=200)] | None = None
+
+
+class UnblockConfirmation(BaseModel):
+    allow_access: bool = Field(
+        description="Разрешить доступ к этой папке и её подпапкам"
+    )
+
+
+Scopes = Annotated[list[MailboxScope], Field(min_length=1, max_length=100)]
+
+
 @mcp.tool(annotations=READ)
 def list_accounts() -> dict:
     """List locally connected addresses and their access modes. For first connection run ma-ru connect."""
@@ -31,21 +49,50 @@ def list_accounts() -> dict:
 
 @mcp.tool(annotations=READ)
 def list_folders(account: Short, counts: bool = False) -> list[dict]:
-    """List mailbox folders, server roles and optional total/unread counts."""
-    with mailbox(current(account)) as client:
-        result = []
-        folders = (
-            client.xlist_folders()
-            if client.has_capability("XLIST")
-            else client.list_folders()
-        )
-        for flags, _, folder in folders:
-            item = {"folder": folder, "roles": [f.decode() for f in flags]}
-            if counts and b"\\noselect" not in {f.lower() for f in flags}:
-                status = client.folder_status(folder, ["MESSAGES", "UNSEEN"])
+    """Show folder rules, effective modes, roles and optional permitted counts for one mailbox."""
+    acc = current(account)
+    with mailbox(acc) as client:
+        result = policy.catalog(client, acc.email)
+        for item in result:
+            if counts and item["selectable"] and item["mode"] != "blocked":
+                policy.allow(acc.email, item["folder"], client)
+                status = client.folder_status(item["folder"], ["MESSAGES", "UNSEEN"])
                 item.update(messages=status[b"MESSAGES"], unread=status[b"UNSEEN"])
-            result.append(item)
         return result
+
+
+@mcp.tool(annotations=LOCAL)
+def set_mailbox_name(account: Short, name: Short) -> dict:
+    """Set the local display name. The full email address remains visible."""
+    acc = current(account)
+    with database() as db:
+        db.execute(
+            "INSERT INTO mailbox_names VALUES(?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name",
+            (acc.email, name),
+        )
+    return {"account": acc.email, "name": name}
+
+
+@mcp.tool(annotations=LOCAL)
+async def set_folder_rule(
+    account: Short, folder: Short, mode: policy.Mode, ctx: Context
+) -> dict:
+    """Set a mailbox-local folder rule. Restoring access to a blocked branch requires interactive owner consent."""
+    acc = current(account)
+    with mailbox(acc) as client:
+        by_name = {i["folder"]: i for i in policy.catalog(client, acc.email)}
+    item = by_name.get(folder)
+    if item is None:
+        raise Problem("Выберите точное имя из списка папок.")
+    if item["rule"] == "blocked" and mode != "blocked":
+        consent = await ctx.elicit(
+            f"Снять запрет для {acc.email} → {folder} и её подпапок? Новый режим: {mode}.",
+            UnblockConfirmation,
+        )
+        if consent.action != "accept" or not consent.data.allow_access:
+            raise Problem("Запрет сохранён.")
+    policy.update(acc.email, folder, item["delimiter"], mode, item["rule"])
+    return {"account": acc.email, "folder": folder, "rule": mode}
 
 
 @mcp.tool(annotations=READ)
@@ -56,19 +103,14 @@ def search_messages(
     limit: PageSize = 25,
     before: Ref | None = None,
 ) -> dict:
-    """Search by sender, recipient, subject, body, dates, flags or label. An omitted folder scans all selectable folders in folder order, INBOX first. Continue with next_before and identical filters."""
+    """Search one explicit permitted folder or all active folders in priority order. Continue with next_before and identical filters."""
     acc = current(account)
     with mailbox(acc) as client:
         if folder:
             return mail.search_folder(client, acc, folder, filters, limit, before)
-        folders = sorted(
-            (
-                name
-                for flags, _, name in client.list_folders()
-                if b"\\noselect" not in {f.lower() for f in flags}
-            ),
-            key=lambda name: (name.upper() != "INBOX", name),
-        )
+        catalog = policy.catalog(client, acc.email)
+        policy.check_blocked_roots(catalog)
+        folders = [i["folder"] for i in policy.active(catalog)]
         if before:
             if before.folder not in folders:
                 raise Problem("Исходная папка изменилась. Начните поиск снова.")
@@ -122,6 +164,8 @@ def read_thread(ref: Ref, folder: Short | None = None, limit: PageSize = 40) -> 
     acc = current(ref.account)
     with mailbox(acc) as client:
         checked_folder(client, ref, acc)
+        if folder:
+            policy.allow(acc.email, folder, client)
         original = mail.summaries(client, acc, ref.folder, ref.validity, [ref.uid])
         if not original:
             raise Problem("Письмо перемещено. Повторите поиск.")
@@ -139,11 +183,17 @@ def read_thread(ref: Ref, folder: Short | None = None, limit: PageSize = 40) -> 
         folders = (
             [folder]
             if folder
-            else [
-                name
-                for flags, _, name in client.list_folders()
-                if b"\\noselect" not in {f.lower() for f in flags}
-            ]
+            else list(
+                dict.fromkeys(
+                    [
+                        ref.folder,
+                        *(
+                            i["folder"]
+                            for i in policy.active(policy.catalog(client, acc.email))
+                        ),
+                    ]
+                )
+            )
         )
         related, complete = mail.thread_refs(client, acc, folders, ids)
         refs = list(islice(related, limit + 1))
@@ -188,11 +238,49 @@ def read_attachment(
     }
 
 
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+def route_attachments(
+    ref: Ref,
+    disk_owner_uid: Short,
+    disk_folder: Short,
+    phrases: Annotated[list[Short], Field(max_length=40)],
+    preview: bool = True,
+    deadline: routing.CalendarDeadline | None = None,
+) -> dict:
+    """Match any owner-selected phrase in subject/body. An explicit [] matches all mail.
+    Preview paths or copy matching attachments to the owner's chosen folder using the connected Ya-Di profile.
+    Pin user.uid from Ya-Di get_profile. On retry use the same ref and folder.
+    If a deadline was requested, pass calendar_request to Ya-Cal create_event after a successful non-preview run.
+    """
+    account = current(ref.account)
+    with mailbox(account) as client:
+        raw = mail.raw_bytes(client, ref, account)
+    msg = mail.PARSER.parsebytes(raw)
+    return routing.route(
+        msg,
+        ref,
+        disk_owner_uid,
+        disk_folder,
+        phrases,
+        preview,
+        deadline,
+        hashlib.sha256(raw).hexdigest(),
+    )
+
+
 @mcp.tool(annotations=READ)
 def list_labels(account: Short, folder: Short = "INBOX") -> dict:
-    """List server keywords and registered labels. local_labels in message results identify plugin-only tags."""
+    """List server keywords and registered labels. Message local_labels identify plugin-only tags."""
     acc = current(account)
     with mailbox(acc) as client:
+        policy.allow(acc.email, folder, client)
         info = client.select_folder(folder, readonly=True)
     with database() as db:
         known = [
@@ -212,6 +300,7 @@ def count_messages(account: Short, filters: Filter, folder: Short = "INBOX") -> 
     """Count total and unread matches. A Message-ID filter reads identifier headers only."""
     acc = current(account)
     with mailbox(acc) as client:
+        policy.allow(acc.email, folder, client)
         validity = client.select_folder(folder, readonly=True)[b"UIDVALIDITY"]
         matches = set(mail.matching_uids(client, acc, folder, validity, filters))
         total = len(matches)
@@ -224,7 +313,7 @@ def count_messages(account: Short, filters: Filter, folder: Short = "INBOX") -> 
 
 @mcp.tool(annotations=LOCAL)
 def create_label(account: Short, name: Short) -> dict:
-    """Register a label. Applying it uses a server keyword when supported, or a personal plugin tag."""
+    """Register an IMAP label name for this account. Applying it uses a server keyword when supported, or a personal plugin tag."""
     acc = current(account, "organize")
     flag = mail.keyword(name)
     with database() as db:
@@ -249,7 +338,9 @@ def modify_messages(refs: Refs, changes: Changes) -> list[dict]:
 @mcp.tool(annotations=WRITE)
 def create_folder(account: Short, folder: Short) -> dict:
     """Create a mailbox folder."""
-    with mailbox(current(account, "organize")) as client:
+    acc = current(account, "organize")
+    with mailbox(acc) as client:
+        policy.allow(acc.email, folder, client, creating=True)
         client.create_folder(folder)
     return {"created": folder}
 
@@ -273,6 +364,7 @@ def move_messages(
         raise Problem("Выберите письма одной папки одного ящика.")
     with mailbox(acc) as client:
         dest = folder or special(client, role)
+        policy.allow(acc.email, dest, client)
         checked_folder(client, first, acc, write=True)
         uids = sorted({r.uid for r in refs})
         if set(client.get_flags(uids)) != set(uids):
@@ -291,6 +383,27 @@ def list_drafts(
         return mail.search_folder(
             client, acc, special(client, "drafts"), Filter(), limit, before
         )
+
+
+@mcp.tool(annotations=WRITE)
+def prepare_reply(
+    ref: Ref,
+    text: Annotated[str, Field(max_length=500000)],
+    from_account: Short | None = None,
+) -> dict:
+    """Create a reply draft, using the receiving mailbox unless the user explicitly selects another sender.
+    Returns From, To, subject and the target draft ref. Send only on the user's request with send_draft."""
+    target = current(from_account or ref.account, "organize")
+    source = current(ref.account)
+    with mailbox(source) as client:
+        original = mail.reply_source(client, ref, source)
+    subject = str(original.get("Subject") or "")
+    subject = subject if subject.lower().startswith("re:") else "Re: " + subject
+    letter = outbox.Letter(
+        subject=" ".join(subject.split())[:512], text=text, reply_to_message=ref
+    )
+    with mailbox(target) as client:
+        return outbox.draft(client, target, letter, original=original)
 
 
 @mcp.tool(annotations=WRITE)
@@ -344,7 +457,91 @@ def poll_new(
     """Read the next unacknowledged batch for a named schedule. First call starts at current UIDNEXT unless include_existing. Same batch may be redelivered until acknowledged."""
     acc = current(account)
     with mailbox(acc) as client:
+        if folder not in [
+            i["folder"] for i in policy.active(policy.catalog(client, acc.email))
+        ]:
+            raise Problem("Эта папка исключена из обработки по расписанию.")
         return feeds.poll(client, acc, folder, feed, limit, include_existing)
+
+
+def grouped_mailboxes(scopes, filters, feed, limit, include_existing):
+    names = {r["email"]: r.get("name", r["email"]) for r in profiles()}
+    if scopes is None:
+        scopes = [MailboxScope(account=email) for email in names]
+    if len({s.account.strip().lower() for s in scopes}) != len(scopes):
+        raise Problem("Укажите каждый ящик только один раз.")
+    groups = []
+    for scope in scopes:
+        email = scope.account.strip().lower()
+        group = {"account": email, "name": names.get(email, email), "folders": []}
+        groups.append(group)
+        try:
+            acc = current(email)
+            with mailbox(acc) as client:
+                catalog = policy.catalog(client, email)
+                policy.check_blocked_roots(catalog)
+                eligible = policy.active(catalog, scope.folders)
+                if scope.folders is not None:
+                    group["excluded"] = sorted(
+                        set(scope.folders) - {i["folder"] for i in eligible}
+                    )
+                starts = feeds.inventory(acc, feed, catalog) if feed is not None else {}
+                for item in eligible:
+                    folder = item["folder"]
+                    row = {"folder": folder, "mode": item["mode"]}
+                    group["folders"].append(row)
+                    try:
+                        if feed is None:
+                            row.update(
+                                mail.search_folder(client, acc, folder, filters, limit)
+                            )
+                        else:
+                            row.update(
+                                feeds.poll(
+                                    client,
+                                    acc,
+                                    folder,
+                                    feed,
+                                    limit,
+                                    include_existing or starts[folder],
+                                )
+                            )
+                    except Problem as exc:
+                        row["error"] = str(exc)
+        except Problem as exc:
+            group["error"] = str(exc)
+        except (KeyringError, OSError):
+            group["error"] = (
+                "Не удалось открыть подключение или системное хранилище этого ящика."
+            )
+    return {"mailboxes": groups}
+
+
+@mcp.tool(annotations=READ)
+def mailbox_overview(
+    scopes: Scopes | None = None,
+    filters: Filter | None = None,
+    limit_per_folder: PageSize = 5,
+) -> dict:
+    """Group messages by receiving account and folder, priority folders first. Omit scopes for all accounts.
+    Each folder has its own page; continue with search_messages on that account and folder."""
+    return grouped_mailboxes(scopes, filters or Filter(), None, limit_per_folder, False)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, openWorldHint=True
+    )
+)
+def poll_mailboxes(
+    feed: Short,
+    scopes: Scopes,
+    limit_per_folder: PageSize = 10,
+    include_existing: bool = False,
+) -> dict:
+    """Poll each selected mailbox's active folders. Acknowledge each successful folder receipt separately.
+    A new folder discovered after baseline includes its first arrival. A skipped or blocked folder cannot be opted in here."""
+    return grouped_mailboxes(scopes, None, feed, limit_per_folder, include_existing)
 
 
 @mcp.tool(annotations=LOCAL)
