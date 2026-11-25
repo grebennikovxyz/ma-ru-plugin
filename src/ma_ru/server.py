@@ -49,11 +49,16 @@ def list_accounts() -> dict:
 
 
 @mcp.tool(annotations=READ)
-def lazy_digest(account: Short, run_id: Short | None = None) -> dict:
-    """Read the local backlog digest and reasons for items requiring attention."""
+def lazy_digest(
+    account: Short,
+    run_id: Short | None = None,
+    offset: Annotated[int, Field(ge=0)] = 0,
+    limit: PageSize = 20,
+) -> dict:
+    """Read the local backlog digest. Continue with its run ID and next_offset for more items."""
     from .lazy_worker import digest
 
-    return digest(account, run_id)
+    return digest(account, run_id, offset, limit)
 
 
 @mcp.tool(annotations=WRITE)

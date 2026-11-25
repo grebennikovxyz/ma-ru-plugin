@@ -219,7 +219,7 @@ def window(owner, reset, remaining, week_reset, week_used):
         ).fetchone()
 
 
-def digest(email, permitted, run=None):
+def digest(email, permitted, run=None, offset=0, limit=20):
     with db() as con:
         report = con.execute(
             """SELECT r.* FROM lazy_runs r JOIN lazy_run_accounts q ON q.run=r.id
@@ -233,33 +233,34 @@ def digest(email, permitted, run=None):
                 "counts": {},
                 "reason": "Нет обработанных писем",
             }
-        rows = con.execute(
-            "SELECT * FROM lazy_results WHERE account=? AND run=? ORDER BY received,uid",
-            (email, report["id"]),
+        # Avoid exposing blocked folders even in the aggregate. The set is local to this SQLite connection.
+        scope = "account=? AND run=?"
+        args = (email, report["id"])
+        if permitted is not None:
+            con.execute("CREATE TEMP TABLE visible (folder TEXT PRIMARY KEY)")
+            con.executemany(
+                "INSERT INTO visible VALUES(?)", ((name,) for name in permitted)
+            )
+            scope += " AND folder IN visible AND (dest IS NULL OR dest IN visible)"
+        counts = dict(
+            con.execute(
+                f"SELECT state,COUNT(*) FROM lazy_results WHERE {scope} GROUP BY state",
+                args,
+            )
         )
-        counts, attention = {}, []
-        for row in rows:
-            if permitted is not None and (
-                row["folder"] not in permitted
-                or row["dest"]
-                and row["dest"] not in permitted
-            ):
-                continue
-            state = row["state"]
-            counts[state] = counts.get(state, 0) + 1
-            if state in ("review", "uncertain") or state.startswith("moving_"):
-                attention.append(
-                    {
-                        "subject": row["subject"],
-                        "reason": row["reason"],
-                        "folder": row["dest"] or row["folder"],
-                        "original_uid": row["uid"],
-                    }
-                )
+        rows = con.execute(
+            f"""SELECT subject,reason,COALESCE(dest,folder) AS folder,uid AS original_uid
+                         FROM lazy_results WHERE {scope} AND state IN ('review','uncertain','moving_trash','moving_review')
+                         ORDER BY (state='review'),(reason='Отправитель требует согласования'),received,uid
+                         LIMIT ? OFFSET ?""",
+            (*args, limit + 1, offset),
+        ).fetchall()
+        attention = [dict(r) for r in rows[:limit]]
         return {
             "account": email,
             "run": report["id"],
             "attention": attention,
+            "next_offset": offset + limit if len(rows) > limit else None,
             "counts": counts,
             "reason": report["reason"] or "Выполняется",
         }

@@ -28,6 +28,8 @@ def register(actions):
             p.add_argument("--token-budget", type=int, required=True)
         if name == "digest":
             p.add_argument("--run", dest="run_id")
+            p.add_argument("--offset", type=int, default=0)
+            p.add_argument("--limit", type=int, default=20)
     p = commands.add_parser("watch")
     p.add_argument("--socket", help="Сокет рабочего Codex App Server")
     p.add_argument("--once", action="store_true", help="Проверить допуск один раз")
@@ -137,9 +139,14 @@ def setup(email):
     weekly = input(
         f"Недельный предел в процентных пунктах за короткое окно [{rules.weekly:g}]: "
     ).strip()
-    if weekly:
-        rules.weekly = float(weekly.replace(",", "."))
-    rules = lazy_store.Rules.model_validate(rules.model_dump())
+    try:
+        if weekly:
+            rules.weekly = float(weekly.replace(",", "."))
+        rules = lazy_store.Rules.model_validate(rules.model_dump())
+    except ValueError:
+        raise Problem(
+            "Укажите недельный предел больше 0 и не выше 100 процентных пунктов."
+        ) from None
     rules.anchor = ""
     if yes("Включить автоматический разбор в последние 60 минут окна Codex?"):
         rules.endpoint = input(
@@ -296,7 +303,7 @@ def dispatch(args):
             )
         )
     elif args.operation == "digest":
-        show(lazy_worker.digest(email, args.run_id))
+        show(lazy_worker.digest(email, args.run_id, args.offset, args.limit))
     elif args.operation == "doctor":
         show(asyncio.run(doctor(email)))
     elif args.operation == "run":

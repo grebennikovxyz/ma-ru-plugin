@@ -458,7 +458,9 @@ async def watch(socket=None, *, once=False):
                     elif once:
                         return
                     else:
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(
+                            60 if not proxy.active and proxy.sample_at else 5
+                        )
         except (Problem, OSError, ValueError, TimeoutError, KeyError) as exc:
             if once:
                 raise Problem(
@@ -467,14 +469,16 @@ async def watch(socket=None, *, once=False):
             await asyncio.sleep(30)
 
 
-def digest(email, run_id=None):
+def digest(email, run_id=None, offset=0, limit=20):
+    if offset < 0 or not 1 <= limit <= 100:
+        raise Problem("Укажите неотрицательное смещение и от 1 до 100 записей.")
     acc = accounts.current(email)
     if not any(mode == "blocked" for mode, _ in folders.rules(acc.email).values()):
-        return lazy_store.digest(email, None, run_id)
+        return lazy_store.digest(email, None, run_id, offset, limit)
     with mailbox(acc) as client:
         items = folders.catalog(client, email)
         folders.check_blocked_roots(items)
         permitted = {
             i["folder"] for i in items if i["selectable"] and i["mode"] != "blocked"
         }
-    return lazy_store.digest(email, permitted, run_id)
+    return lazy_store.digest(email, permitted, run_id, offset, limit)

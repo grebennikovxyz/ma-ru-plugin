@@ -183,6 +183,38 @@ def test_all_three_cancel_and_resume_without_second_move(inbox):
     asyncio.run(scenario())
 
 
+def test_digest_pages_are_bounded_and_do_not_leak_blocked_folders(inbox):
+    acc, _, _ = inbox
+    run = store.start_run([acc.email])
+    with store.db() as db:
+        db.executemany(
+            "INSERT INTO lazy_results VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                (
+                    run,
+                    acc.email,
+                    "Private" if uid == 1 else "INBOX",
+                    5,
+                    uid,
+                    uid,
+                    "review",
+                    str(uid),
+                    "Отправитель требует согласования" if uid < 30 else "Счёт",
+                    lm.REVIEW,
+                )
+                for uid in range(1, 31)
+            ),
+        )
+    first = store.digest(acc.email, {"INBOX", lm.REVIEW}, run, 0, 20)
+    assert first["counts"] == {"review": 29}
+    assert len(first["attention"]) == 20 and first["next_offset"] == 20
+    assert first["attention"][0]["subject"] == "30"
+    second = store.digest(
+        acc.email, {"INBOX", lm.REVIEW}, run, first["next_offset"], 20
+    )
+    assert len(second["attention"]) == 9 and second["next_offset"] is None
+
+
 def test_dormant_contacts_rank_two_way_and_latest(inbox):
     acc, box, rules = inbox
     for uid, peer in [
