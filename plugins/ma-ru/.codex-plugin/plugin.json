@@ -1,0 +1,25 @@
+{
+  "name": "ma-ru",
+  "version": "0.1.0",
+  "description": "Почта Mail.ru для агентов. Поиск, метки, переписка и проверка новых писем по расписанию.",
+  "author": {
+    "name": "Антон Гребенников"
+  },
+  "repository": "https://github.com/grebennikovxyz/ma-ru-plugin",
+  "license": "Apache-2.0",
+  "requires_local_executor": true,
+  "mcpServers": "./mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Ma-Ru",
+    "shortDescription": "Mail.ru для почтовых задач",
+    "developerName": "Антон Гребенников",
+    "category": "Productivity",
+    "logo": "./assets/envelope.svg",
+    "composerIcon": "./assets/envelope.svg",
+    "defaultPrompt": [
+      "Покажи новые письма в подключённом ящике",
+      "Найди переписку по заказу и подготовь черновик ответа"
+    ]
+  }
+}

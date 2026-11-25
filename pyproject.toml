@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grebennikov-ma-ru"
+version = "0.1.0"
+description = "Mail.ru over MCP for agents and scheduled tasks"
+requires-python = ">=3.13"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dependencies = [
+    "IMAPClient>=3.0.1,<4", "mcp>=1.30,<2", "pydantic>=2.11,<3",
+    "keyring>=25,<26", "platformdirs>=4,<5", "uvicorn>=0.31,<1", "starlette>=0.40,<1",
+]
+
+[project.scripts]
+ma-ru = "ma_ru.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ma_ru"]

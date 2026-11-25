@@ -1,0 +1,8 @@
+Ma-Ru
+Copyright 2026 Антон Геннадьевич Гребенников
+
+The mailbox, outbox, scheduling and local account components are adapted from
+Ya-Ma (Copyright 2026 Антон Геннадьевич Гребенников, Apache License 2.0).
+https://github.com/grebennikovxyz/ya-mail-plugin
+
+Ma-Ru is an independent integration for Mail.ru.

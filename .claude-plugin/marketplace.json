@@ -1,0 +1,14 @@
+{
+  "name": "grebennikov-ma-ru",
+  "metadata": {"description": "Почта Mail.ru для Claude Code"},
+  "owner": {
+    "name": "Антон Гребенников"
+  },
+  "plugins": [
+    {
+      "name": "ma-ru",
+      "description": "Почта Mail.ru для агентов. Поиск, метки, переписка и проверка новых писем по расписанию.",
+      "source": "./plugins/ma-ru"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ma-ru": {
+      "type": "stdio",
+      "command": "ma-ru",
+      "args": [
+        "serve"
+      ]
+    }
+  }
+}
