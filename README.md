@@ -8,9 +8,16 @@ Ma-Ru подключает почтовый ящик к Codex, Claude Code и Op
 
 ## Быстрый старт на Windows, macOS и Linux
 
-Каталоги Claude Code и Codex доступны из этого репозитория. Каждый релиз также запускает публикацию полного плагина и отдельного навыка в ClawHub. Статусы внешних площадок и порядок обновления описаны в [инструкции по публикации](docs/marketplaces.md).
+Сначала установите почтовую команду `ma-ru` и подключите ящик. Затем выберите способ установки плагина для своего клиента.
 
-Понадобятся Git и uv. Выполняйте команды под пользователем, от имени которого будет работать агент. uv подберёт Python 3.13. [Установка uv](https://docs.astral.sh/uv/getting-started/installation/) · [Установка Git](https://git-scm.com/downloads)
+| Клиент | Откуда установить | Инструкция |
+| --- | --- | --- |
+| Codex | Каталог плагинов в GitHub-репозитории `grebennikovxyz/ma-ru-plugin` | [Установить в Codex](#codex) |
+| Claude Code | Тот же GitHub-репозиторий через каталог Claude Code | [Установить в Claude Code](#claude-code) |
+| OpenClaw | Полный плагин из ClawHub или GitHub. Для уже подключённого MCP-сервера доступен отдельный навык | [Установить в OpenClaw](#openclaw) |
+| n8n на своём сервере | Пакет ноды из GitHub Releases для подключения к HTTPS-шлюзу Ma-Ru | [Установить ноду n8n](n8n/README.md#установка-в-self-hosted-n8n) |
+
+Выполняйте команды на компьютере агента под его системным пользователем. Для OpenClaw это хост Gateway, в том числе при работе с телефона. Git и uv нужны для установки почтовой команды из ветки `main`. uv подберёт Python 3.13. [Репозиторий Ma-Ru](https://github.com/grebennikovxyz/ma-ru-plugin) · [Установка uv](https://docs.astral.sh/uv/getting-started/installation/) · [Установка Git](https://git-scm.com/downloads)
 
 ```sh
 uv tool install --python 3.13 git+https://github.com/grebennikovxyz/ma-ru-plugin.git@main
@@ -23,14 +30,7 @@ uv tool update-shell
 ma-ru connect
 ```
 
-Чтобы сразу подключить **Codex**, выполните следующие две команды, затем откройте новый чат.
-
-```sh
-codex plugin marketplace add grebennikovxyz/ma-ru-plugin --ref main
-codex plugin add ma-ru@grebennikov-ma-ru
-```
-
-Попросите «Покажи подключённые ящики. Для моего рабочего адреса покажи темы пяти последних писем во Входящих». При подключении нескольких ящиков укажите полный адрес. Варианты для Claude Code, OpenClaw и телефона описаны ниже.
+Мастер проверит доступ к ящику. После установки плагина в клиенте откройте новый чат и попросите «Покажи подключённые ящики». Если ящиков несколько, укажите в следующем запросе полный адрес, например «Покажи темы пяти последних входящих для orders@example.org».
 
 ## Мастер подключения
 
@@ -113,6 +113,8 @@ ma-ru read "Покажи темы пяти последних писем раб�
 
 При работающем MCP-сервере Ma-Ru проверяет стабильный релиз GitHub раз в сутки. При появлении новой версии агент один раз покажет её при просмотре подключённых ящиков. Проверка отправляет запрос к публичному репозиторию. Установку запускает владелец. Команда `ma-ru updates --check` проверяет версию сразу, `--off` отключает фоновые проверки, `--on` возвращает их. [Последний стабильный релиз](https://github.com/grebennikovxyz/ma-ru-plugin/releases/latest)
 
+Каждый релиз запускает публикацию полного плагина и отдельного навыка в ClawHub. [Порядок публикации и статусы площадок](docs/marketplaces.md)
+
 ## Ленивый разбор старой почты
 
 Режим включается отдельно для каждого ящика. Он обрабатывает непрочитанные письма старше одного календарного года в порядке даты получения. По умолчанию выбраны Входящие. Для перемещения достаточно режима «Чтение, метки, папки и черновики».
@@ -158,17 +160,34 @@ ma-ru lazy run --account your-address@mail.ru --max-messages 12 --token-budget 1
 | --- | --- | --- |
 | Codex | Локальный процесс на Windows, macOS или Linux | В новом чате вызвать `list_accounts` |
 | Claude Code | Локальный процесс под пользователем Claude Code | Открыть `/mcp`, затем попросить список ящиков |
-| OpenClaw | На компьютере личного Gateway под его пользователем | Выполнить `openclaw mcp probe ma-ru` и проверить список инструментов в сессии агента |
+| OpenClaw | На компьютере личного Gateway под его пользователем | Выполнить `openclaw plugins inspect ma-ru` для полного плагина, затем запросить список ящиков в новой сессии агента |
 | Android и iOS | На личном Gateway. Телефон открывает чат. Клиенты с поддержкой Streamable HTTP и Bearer также могут обращаться к MCP напрямую | С телефона запросить пять тем из INBOX |
 
+### Codex
+
+В терминале добавьте GitHub-репозиторий как каталог, затем установите из него Ma-Ru. Имя каталога в Codex — `grebennikov-ma-ru`.
+
+```sh
+codex plugin marketplace add grebennikovxyz/ma-ru-plugin --ref main
+codex plugin add ma-ru@grebennikov-ma-ru
+```
+
+Откройте новый чат Codex, выберите Ma-Ru и попросите показать подключённые ящики.
+
 ### Claude Code
+
+Добавьте репозиторий и установите плагин в терминале.
 
 ```sh
 claude plugin marketplace add grebennikovxyz/ma-ru-plugin
 claude plugin install ma-ru@grebennikov-ma-ru
 ```
 
-Для установки только MCP-инструментов в Claude Code или Codex есть прямые команды. Выберите один способ регистрации для каждого клиента, чтобы в нём появился один набор инструментов.
+Откройте новую сессию Claude Code и введите `/mcp`. В списке серверов должен появиться Ma-Ru.
+
+#### Подключение только MCP-инструментов
+
+Если нужны только почтовые инструменты, выберите команду своего клиента. Это отдельный способ подключения для тех, кто пропускает установку плагина из каталога.
 
 ```sh
 claude mcp add --scope user ma-ru -- ma-ru serve
@@ -177,14 +196,37 @@ codex mcp add ma-ru -- ma-ru serve
 
 ### OpenClaw
 
-В репозитории есть готовый marketplace для OpenClaw. После установки команды `ma-ru` на хосте Gateway выполните `openclaw plugins install ma-ru --marketplace grebennikovxyz/ma-ru-plugin`. Также можно скачать архив и установить его в профиль Gateway. В актуальном OpenClaw локальный архив требует флага доверия источнику и согласия на запуск заявленного MCP-сервера. [Скачать архивы Ma-Ru](https://github.com/grebennikovxyz/ma-ru-plugin/releases)
+**Полный плагин из ClawHub.** После настройки почтовой команды на хосте Gateway установите опубликованный пакет. Он содержит навык для агента и настройки запуска MCP-сервера `ma-ru serve`. Флаг `--accept-capabilities` разрешает OpenClaw использовать объявленные плагином возможности, включая запуск этого сервера. [Плагин Ma-Ru в ClawHub](https://clawhub.ai/grebennikovxyz/plugins/ma-ru)
+
+```sh
+openclaw plugins install clawhub:@grebennikovxyz/ma-ru --accept-capabilities
+openclaw plugins inspect ma-ru
+```
+
+**Полный плагин из GitHub.** Если предпочитаете установить плагин из репозитория проекта, используйте его каталог напрямую. При запросе OpenClaw подтвердите доверие к источнику.
+
+```sh
+openclaw plugins install ma-ru --marketplace grebennikovxyz/ma-ru-plugin --accept-capabilities
+```
+
+**Только навык из ClawHub.** Этот вариант подходит, если агент уже видит инструменты Ma-Ru. В терминале перейдите в рабочую папку этого агента и выполните команду ClawHub CLI. Навык появится в каталоге `skills` рабочей папки. [Навык Ma-Ru в ClawHub](https://clawhub.ai/grebennikovxyz/skills/ma-ru)
+
+```sh
+clawhub --workdir . install @grebennikovxyz/ma-ru
+```
+
+После установки откройте новую сессию агента и попросите показать подключённые ящики. Если OpenClaw сообщил, что активация отложена до следующего запуска Gateway, сначала перезапустите Gateway.
+
+Для установки из скачанного файла возьмите архив `ma-ru-…-clawhub.tgz` из GitHub Releases. Выполните команды в папке с архивом. Флаг `--force` подтверждает доверие к локальному источнику. [Скачать архивы Ma-Ru](https://github.com/grebennikovxyz/ma-ru-plugin/releases/latest)
 
 ```sh
 openclaw plugins install ./ma-ru-0.4.1-clawhub.tgz --force --accept-capabilities
 openclaw plugins inspect ma-ru
 ```
 
-Установите Ma-Ru и подключите почту под системным пользователем Gateway. В актуальных версиях OpenClaw сервер добавляется в реестр MCP командами ниже. Подключайте его к личному агенту, которым управляет владелец ящиков. Пользователи с доступом к этому агенту могут воспользоваться его почтовыми правами.
+#### Ручная регистрация MCP в OpenClaw
+
+Если вы настраиваете MCP отдельно или агент после установки полного плагина не видит почтовые инструменты, добавьте сервер в реестр MCP командами ниже. Подключайте его к личному агенту владельца ящиков. Пользователи с доступом к этому агенту могут воспользоваться его почтовыми правами.
 
 ```sh
 openclaw mcp add ma-ru --command ma-ru --arg serve
