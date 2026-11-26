@@ -8,6 +8,8 @@ Ma-Ru подключает почтовый ящик к Codex, Claude Code и Op
 
 ## Быстрый старт на Windows, macOS и Linux
 
+Каталоги Claude Code и Codex доступны из этого репозитория. Каждый релиз также запускает публикацию полного плагина и отдельного навыка в ClawHub. Статусы внешних площадок и порядок обновления описаны в [инструкции по публикации](docs/marketplaces.md).
+
 Понадобятся Git и uv. Выполняйте команды под пользователем, от имени которого будет работать агент. uv подберёт Python 3.13. [Установка uv](https://docs.astral.sh/uv/getting-started/installation/) · [Установка Git](https://git-scm.com/downloads)
 
 ```sh
@@ -178,7 +180,7 @@ codex mcp add ma-ru -- ma-ru serve
 В репозитории есть готовый marketplace для OpenClaw. После установки команды `ma-ru` на хосте Gateway выполните `openclaw plugins install ma-ru --marketplace grebennikovxyz/ma-ru-plugin`. Также можно скачать архив и установить его в профиль Gateway. В актуальном OpenClaw локальный архив требует флага доверия источнику и согласия на запуск заявленного MCP-сервера. [Скачать архивы Ma-Ru](https://github.com/grebennikovxyz/ma-ru-plugin/releases)
 
 ```sh
-openclaw plugins install ./ma-ru-0.4.0-clawhub.tgz --force --accept-capabilities
+openclaw plugins install ./ma-ru-0.4.1-clawhub.tgz --force --accept-capabilities
 openclaw plugins inspect ma-ru
 ```
 

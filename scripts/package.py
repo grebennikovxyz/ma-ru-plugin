@@ -96,7 +96,7 @@ def package(runtime=None):
                 archive.writestr(f, content)
             readme = (ROOT / "README.md").read_text(encoding="utf-8")
             archive.writestr("README.md", readme)
-            for f in ("LICENSE", "NOTICE"):
+            for f in ("LICENSE", "NOTICE", "docs/marketplaces.md"):
                 archive.write(ROOT / f, f)
             if runtime:
                 runtime_files(archive, runtime, packages)
@@ -115,7 +115,7 @@ def clawhub_package():
     path = DIST / f"ma-ru-{VERSION}-clawhub.tgz"
     with tarfile.open(path, "w:gz", format=tarfile.USTAR_FORMAT) as archive:
         metadata = json.dumps(
-            {"name": "ma-ru", "version": VERSION, "license": "Apache-2.0"}
+            {"name": "@grebennikovxyz/ma-ru", "version": VERSION, "license": "Apache-2.0"}
         ).encode()
         entry = tarfile.TarInfo("package/package.json")
         entry.size = len(metadata)
@@ -127,7 +127,7 @@ def clawhub_package():
             "skills/ma-ru/SKILL.md",
         ):
             archive.add(PLUGIN / name, arcname="package/" + name, recursive=False)
-        for name in ("LICENSE", "NOTICE", "README.md"):
+        for name in ("LICENSE", "NOTICE", "README.md", "docs/marketplaces.md"):
             archive.add(ROOT / name, arcname="package/" + name, recursive=False)
     return path
 
