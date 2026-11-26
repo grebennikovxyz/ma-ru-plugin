@@ -12,6 +12,8 @@ Claude Code и Codex читают свои каталоги из ветки `mai
 
 Для первой публикации и последующих релизов сохраните токен издателя ClawHub с правом публикации от имени `grebennikovxyz` в секрете GitHub Actions `CLAWHUB_TOKEN`. Его использует только задание релиза. Отдельный навык публикуется из `plugins/ma-ru/skills/ma-ru`, полный плагин — из проверенного архива GitHub Release. Страница публикации может появиться после проверок реестра. Для установки из GitHub уже доступна команда `openclaw plugins install ma-ru --marketplace grebennikovxyz/ma-ru-plugin`.
 
+Включение обеих публикаций токеном даёт ClawHub право распространять текст отдельного навыка по MIT-0. Эта лицензия разрешает использование, изменение и распространение без указания автора. Полный пакет Ma-Ru поставляется по Apache-2.0. [Лицензия навыков в ClawHub CLI](https://unpkg.com/clawhub@0.27.0/dist/schema/license.js)
+
 После приёма в ClawHub идентификатор полного плагина — `@grebennikovxyz/ma-ru`, идентификатор навыка — `ma-ru` издателя `grebennikovxyz`. Отдельный навык пригодится тем, у кого сервер Ma-Ru уже подключён на Gateway. [Создание навыков](https://docs.openclaw.ai/tools/creating-skills) · [Публикация в ClawHub](https://docs.openclaw.ai/clawhub/publishing)
 
 ## PickAPlugin и публичный каталог OpenAI
